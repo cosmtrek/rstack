@@ -1,0 +1,10 @@
+{
+ "id": "R001",
+ "origin": "示例：某期复盘发现 agent 按提交祖先关系判断「没合入」，实际是 squash 合入",
+ "cwd": "~/src/myrepo",
+ "prompt": "myrepo 仓库里提交 abc1234（某 MR 合入时的分支头）的改动，现在是否已经全部进入 origin/main？给出结论和依据。",
+ "must_contain": [],
+ "must_not_contain": [],
+ "note": "squash 合入，按提交比对会误判；期望按内容比（merge-tree / diff）",
+ "expected": "已经全部进入 origin/main。该 MR 是 squash 合入，按提交祖先关系认不出来，但按内容比 abc1234 的改动都已在 main 里。"
+}

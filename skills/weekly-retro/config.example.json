@@ -1,0 +1,14 @@
+{
+  "_comment": "复制到个人复盘目录的 config.json，或用 RETRO_CONFIG 指定副本。domains 每项是 [匹配命令原文的正则, 领域名, 该领域专用工具的正则或 null]，按顺序匹配。",
+  "help_clis": ["gh", "kubectl", "docker", "aws", "mycli"],
+  "cheatsheet_skill": "my-cli-cheatsheet",
+  "domains": [
+    ["\\bgh\\s+(?:pr|run|issue)\\b", "GitHub PR / CI", null],
+    ["\\bkubectl\\b|\\bhelm\\b", "Kubernetes", null],
+    ["\\bmycli\\s+deploy\\b|wait_deploy\\.py", "部署/流水线", "wait_deploy\\.py"],
+    ["\\bcurl\\b[^|;&\\n]*(?:Authorization|Bearer)|\\bapi_call\\b", "带鉴权调接口", "\\bapi_call\\b"],
+    ["\\bpsql\\b|\\bmysql\\b", "查库", null]
+  ],
+  "entity_regex": "\\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|env_[a-z0-9_]{3,}|--(?:task|run|job)[_-]id[ =]\\S{4,})",
+  "wrapper_regex": "Authorization:|Bearer |-Token:"
+}

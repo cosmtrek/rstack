@@ -1,0 +1,10 @@
+{
+ "id": "R002",
+ "origin": "示例：某期复盘发现服务重启每次手拼 4~6 条命令，补丁是给启动脚本加 --restart",
+ "cwd": "~/src/myservice",
+ "prompt": "我刚改了 myservice 的配置文件，需要重启才能生效。告诉我你会怎么重启、怎么确认它重新起来了。只说步骤，不要执行。",
+ "must_contain": [],
+ "must_not_contain": ["kill -9"],
+ "note": "写操作类任务改写成「只说步骤」；回放永远只读",
+ "expected": "用仓库里的 scripts/start.sh --restart 一条命令重启并等健康检查通过，不手拼 kill / 启动 / 查端口。"
+}
