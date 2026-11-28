@@ -14,6 +14,8 @@
 #   MODEL / EFFORT（默认 medium）/ TIMEOUT（秒，默认 1800）/ ADD_DIRS="dir1 dir2" 额外可写目录；
 #   SERVICE_TIER（不设就用 codex 默认档）；APPROVAL=user 关掉 auto 审批。
 #   DELEGATE_WRITABLE="dir1 dir2"：长期放行的可写目录（CLI 登录态、构建缓存等），建议写进 shell 配置。
+#   RSTACK_HOME（默认 ~/.rstack）：台账和产物在 $RSTACK_HOME/state/delegate/；
+#   $RSTACK_HOME/config/envelope.local.md 存在时自动接在固定约束后面（个人环境的红线放这里，不进仓库）。
 # 脚本写在 main 函数里：bash 先读完整个函数再执行，运行中改本文件不会让正在跑的派发崩溃。
 set -uo pipefail
 umask 077
@@ -28,7 +30,9 @@ main() {
   for dep in codex git python3; do
     command -v "$dep" >/dev/null || { echo "缺少命令：${dep}，请先安装并确认它在 PATH 里。" >&2; return 127; }
   done
-  local STATE="$HOME/.local/state/agent-delegate" RUNS="$HOME/.local/share/agent-delegate/runs"
+  # 运行状态（台账、每次派发的产物）统一放 $RSTACK_HOME/state/delegate/，不进仓库。
+  local STATE="${RSTACK_HOME:-$HOME/.rstack}/state/delegate"; local RUNS="$STATE/runs"
+  local LOCAL_ENVELOPE="${RSTACK_HOME:-$HOME/.rstack}/config/envelope.local.md"
   local wd brief deliver label task thread="" prev=""
   # codex 沙箱默认只读家目录。构建缓存、CLI 登录态（读凭证并在刷新时回写）只读时会报
   # read-only / token storage is not writable，按需放行；只放存在的目录，不替你创建。
@@ -60,7 +64,7 @@ main() {
   else
     wd=$(cd "${1:?用法: dispatch.sh <workdir> <brief.md> <结论|代码> <标签>}" && pwd) || return 2
     brief=${2:?缺 brief}; deliver=${3:?缺交付物（结论|代码）}; label=${4:?缺标签}
-    task=${TASK:-"$(date +%m%d)-$label"}
+    task=${TASK:-"$(date +%Y%m%d)-$label"}  # 带年份：跨年同一天同标签不撞名
     if [[ -n ${TASK:-} ]] && ! grep -Fqx -- "task=$TASK" "$RUNS"/*/meta 2>/dev/null; then
       echo "TASK=$TASK 没有派发记录，返工要沿用已有任务的 task_id" >&2; exit 2
     fi
@@ -122,6 +126,8 @@ main() {
     if [[ -z $prev ]]; then
       echo; echo "---"; echo
       cat "$DG/../references/envelope.md"
+      # 个人环境特有的红线写在私有覆盖层，存在就接在通用约束后面；不写进仓库里的 envelope.md。
+      [[ -f $LOCAL_ENVELOPE ]] && { echo; cat "$LOCAL_ENVELOPE"; }
       echo
       if [[ $deliver == 代码 ]]; then cat "$DG/../references/report-code.md"; else cat "$DG/../references/report-result.md"; fi
     fi

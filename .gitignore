@@ -1,3 +1,18 @@
 __pycache__/
 *.pyc
+
+# 私有配置和本地覆盖层：真正的配置在 $RSTACK_HOME/config/（默认 ~/.rstack），仓库里只放 *.example.*
 skills/weekly-retro/config.json
+*.local.*
+
+# 复盘产物和运行日志：只该出现在 $RSTACK_HOME/retro、$RSTACK_HOME/state，误写进仓库也不要提交
+**/metrics.json
+**/metrics.jsonl
+**/turns.tsv
+**/samples.md
+**/summary.json
+**/hits.jsonl
+**/records.jsonl
+[0-9][0-9][0-9][0-9]-W*/
+skills/weekly-retro/replays/*.json
+!skills/weekly-retro/replays/examples/*.json

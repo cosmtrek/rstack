@@ -1,6 +1,6 @@
 # 回放题
 
-个人题目放在 `$RETRO_DIR/replays/*.json`，默认是 `~/notes/retro/replays/`。这里的 `examples/` 是格式模板，请按自己的环境替换工作目录和题面。首次使用可运行 `scripts/replay.py --example --out <仓库外的目录>`，用合成文件验证 Codex 回放。
+个人题目放在 `$RETRO_DIR/replays/*.json`，默认是 `~/.rstack/retro/replays/`（`$RSTACK_HOME/retro/replays/`），不放进本仓库。这里的 `examples/` 是格式模板，请按自己的环境替换工作目录和题面。首次使用可运行 `scripts/replay.py --example --out <仓库外的目录>`，用合成文件验证 Codex 回放。
 
 必填字段是 `id`（唯一题号）和 `prompt`（题面）。可选字段包括 `cwd`（工作目录，省略时用家目录）、`origin`（来源）、`expected`（交给裁判的标准结论）、`must_contain` / `must_not_contain`（正则列表）、`note`（备注）和 `paused`（停跑原因）。
 

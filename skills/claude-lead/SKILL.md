@@ -10,9 +10,10 @@ description: 主会话（Claude）只做规划、拍板和复核，把读得多�
 **分工：codex 负责「看清楚」，我负责「想清楚」；实现只在想清楚之后才派。** 主会话的上下文最贵，只用来思考和决策；
 执行者的上下文随便用，交回来的是精简结论。
 
-`$DG` = 本技能的 `scripts/` 目录（安装后一般是 `~/.claude/skills/claude-lead/scripts/`）；产物在 `~/.local/share/agent-delegate/runs/`；
-台账在 `~/.local/state/agent-delegate/records.jsonl`（运行状态，不进 git）；契约模板 `references/brief-template.md`；
-设计取舍和来由见 `DESIGN.md`；个人调整记录写 `~/.local/state/agent-delegate/retro.md`（仓库的 `ledger/retro.md` 为模板）。
+`$DG` = 本技能的 `scripts/` 目录（安装后一般是 `~/.claude/skills/claude-lead/scripts/`）；`$RSTACK_HOME` = 私有根目录（默认 `~/.rstack`）。
+产物在 `$RSTACK_HOME/state/delegate/runs/`，台账在 `$RSTACK_HOME/state/delegate/records.jsonl`（运行状态，不进 git）；契约模板 `references/brief-template.md`；
+设计取舍和来由见 `DESIGN.md`；个人调整记录写 `$RSTACK_HOME/state/delegate/retro.md`（仓库的 `ledger/retro.md` 为模板）。
+固定约束是 `references/envelope.md`（通用）加上 `$RSTACK_HOME/config/envelope.local.md`（本机红线，存在就自动接在后面）。
 
 ## 流水线：侦察 → 拍板 → 施工
 
@@ -85,3 +86,5 @@ TASK=<原task_id> "$DG/dispatch.sh" <workdir> <brief.md> 代码 <标签>  # 返�
   慢的轮次逐个归因：环境类失败多（沙箱、凭证、网络）是脚本 / 权限问题，改 dispatch.sh；命令多却没环境失败、或复核原因是 brief，
   是契约问题（范围写宽、停止条件不清、事实没核）；主会话与派发的 token 比例看工作量有没有真的移出去，比例长期很低就回到「漏派」找原因；
   结论写进个人复盘记录，学到的东西提炼成原则改进本技能，具体事例只留在 retro。
+- 改进落在哪：只对你的环境成立的红线写 `envelope.local.md`，事例和数据留在 `$RSTACK_HOME`；换个环境也成立的原则和脚本修复才改本仓库，
+  提交前跑 `bash scripts/check_public.sh`（仓库根目录）。

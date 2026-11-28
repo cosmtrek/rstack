@@ -1,0 +1,19 @@
+{
+  "_comment": "复制到 $RSTACK_HOME/config/guard_rules.json（私有，不进仓库）后按你的复盘改。字段：id / pattern（只在命令执行位置匹配）/ decision（ask|deny）/ reason（含修复提示和豁免方式）/ selftest（用 false && 短路并带 # retro-selftest）。也可以直接写成规则列表。",
+  "rules": [
+    {
+      "id": "force-push-main",
+      "pattern": "git\\s+push\\b(?=[^\\n;&|]*(?:--force\\b|--force-with-lease\\b|\\s-f\\b))(?=[^\\n;&|]*\\b(?:main|master)\\b)",
+      "decision": "ask",
+      "reason": "要强推 main / master，会覆盖远端别人的提交。先 git fetch 看远端比本地多了哪些提交；确认要覆盖，在命令末尾加 `# confirmed-by-user` 重跑。",
+      "selftest": "false && git push --force origin main  # retro-selftest"
+    },
+    {
+      "id": "prod-config-cli",
+      "pattern": "mycli\\s+config\\s+(?:create|update)\\b(?=[^\\n;&|]*--env[ =]prod\\b)",
+      "decision": "deny",
+      "reason": "prod 配置用 CLI 改一定会被审批管控拒绝。把要改的 key、值、说明整理成表交给用户在网页上改。如果用户明确说管控已放开，在命令末尾加 `# confirmed-by-user` 重跑。",
+      "selftest": "false && mycli config update app.key --env prod  # retro-selftest"
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 {
-  "_comment": "复制到个人复盘目录的 config.json，或用 RETRO_CONFIG 指定副本。domains 每项是 [匹配命令原文的正则, 领域名, 该领域专用工具的正则或 null]，按顺序匹配。",
+  "_comment": "复制到 $RSTACK_HOME/config/retro.json（默认 ~/.rstack，私有不进仓库），或用 RETRO_CONFIG 指定副本。domains 每项是 [匹配命令原文的正则, 领域名, 该领域专用工具的正则或 null]，按顺序匹配。user_corr / user_obs（部分匹配）、empty_ok / flow_skip（整句 / 整个程序名匹配）是补充正则，和内置的按「或」合并，写字符串或列表都行。agy_brain_dirs 是 scan.py / turn.py 额外扫描的 Antigravity（agy）brain 目录（默认已扫 ${GEMINI_HOME:-~/.gemini}/*/brain），支持 ~ 和通配符；宿主按安装生成的 hash 目录用 * 代替，别写真实 hash。",
+  "agy_brain_dirs": ["~/.t3/userdata/providers/antigravity/*/antigravity-acp/brain"],
   "help_clis": ["gh", "kubectl", "docker", "aws", "mycli"],
   "cheatsheet_skill": "my-cli-cheatsheet",
   "domains": [
@@ -10,5 +11,9 @@
     ["\\bpsql\\b|\\bmysql\\b", "查库", null]
   ],
   "entity_regex": "\\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|env_[a-z0-9_]{3,}|--(?:task|run|job)[_-]id[ =]\\S{4,})",
-  "wrapper_regex": "Authorization:|Bearer |-Token:"
+  "wrapper_regex": "Authorization:|Bearer |-Token:",
+  "user_corr": ["不是这个意思", "回滚掉"],
+  "user_obs": ["跑到哪了"],
+  "empty_ok": ["(?:收到|OK)[。！ ]*"],
+  "flow_skip": ["just", "mytool"]
 }

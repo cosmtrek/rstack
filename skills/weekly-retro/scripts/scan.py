@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""只读扫描一段时间内的 Claude Code 与 Codex 会话记录，产出复盘用的指标和样本。
+"""只读扫描一段时间内的 Claude Code、Codex 与 Antigravity（agy）会话记录，产出复盘用的指标和样本。
 
 用法: python3 -I scan.py --since 2026-11-02 [--until 2026-11-09] [--out <目录>] [--include-retro]
 产物:
@@ -7,12 +7,18 @@
   <out>/samples.md    每类样本，按会话轮流取，避免被单个会话占满
   <out>/turns.tsv     窗口内所有短的用户消息（时间 / 来源 / 会话 / 标签 / 原文），介入判读以它为准
 指标口径改动要同步改 METRICS_VERSION 并写进 tune-log，否则跨周对比失真。
-环境相关的配置（常用 CLI、速查技能、流程领域表、反复出现的 ID 形状）放在 $RETRO_CONFIG 或 $RETRO_DIR/config.json，
-格式见 config.example.json；没有配置文件时用下面的通用默认值。
+环境相关的配置（常用 CLI、速查技能、流程领域表、反复出现的 ID 形状、补充的介入说法）放在 $RETRO_CONFIG，
+默认 $RSTACK_HOME/config/retro.json（私有，不进仓库），格式见 config.example.json；没有配置文件时用下面的通用默认值。
+环境相关的正则和事例只写进私有配置；公开仓库里只改通用机制。
 """
-import argparse, collections, datetime as dt, glob, json, os, re
+import argparse, collections, datetime as dt, glob, importlib.util, json, os, re, sys
 
-METRICS_VERSION = 6
+def _load(name):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(os.path.dirname(os.path.realpath(__file__)), name + '.py'))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); return mod
+paths = _load('rstack_paths'); agy = _load('agy_log')
+
+METRICS_VERSION = 7
 # v2: 按记录时间戳筛选、覆盖统计；v3: 用户消息分推进/介入，读 hook 命中日志
 # v4: 默认排除复盘会话；介入正则只做预标注，另出 turns.tsv 供人工判读；新增空确认、技能使用、
 #     help 会话是否加载过速查技能、报错细分、每千次工具调用比率；Codex 拦截只认明确的拒绝文本；样本按会话轮流取
@@ -20,28 +26,50 @@ METRICS_VERSION = 6
 #     附跨会话反复出现的 ID / 坐标、临时手写的 JWT/curl 包装脚本、各领域专用工具的采用率、耗时；
 #     复盘会话不再整条排除，只丢掉发起复盘之后的记录；原有指标只受这一条影响
 # v6: 兼容自定义会话目录和新版 Hook 日志，补计委派提醒，移除环境专用的流程排除项
-SELF_CORR = re.compile(r'[^。\n]*(更正|我说错|说错了|看反|是我看错|收回|我上一条|我上次说|之前说的不对|不是我之前说的|我前面说过)[^。\n]*')
-USER_CORR = re.compile(r'(不对|不是这样|错了|看错|搞错|说错|看反|没理解|没太理解|不要写|不用写|别再|只想看|只解决|先停|停掉|不是我要的'
-                       r'|为啥不是|为什么不是|不用找|不用管|不要用|应该是.{0,30}吧|你直接改|直接改|写死|需要你修复|不行么|只需要|按照规范|不要干预|不要限制|尽量简短|等部署好|给个结论)')
-USER_OBS = re.compile(r'(卡在哪|为啥这么慢|为什么这么慢|怎么这么慢|现在什么情况|现在是什么情况|在跑.{0,6}么|还在跑|跑完了?么|推送了么|怎么还没'
-                      r'|进展现在是啥|是不是结束了|有啥异常么|改了么|是不是.{0,8}过期|这个是改哪个|进展怎么样|进度怎么样)')
-# 空确认：agent 停下来问、用户只回一句同意，没有新信息。多了说明 agent 在不必要的地方停
-EMPTY_OK = re.compile(r'^(好的?|行|可以的?|嗯)?[，, ]*(那就?)?(提交|推送|推|修|改|加上|开干|开搞|继续|绑定|精简|删掉|修一下|改下|修复下|全部确认|按照你的建议来|接着干)?'
-                      r'(一下)?(吧|下吧)?[。！ ]*$')
-CL_DENY = re.compile(r'denied|auto mode classifier|not allowed|Blocked:|安全检查|safety check', re.I)
-CX_DENY = re.compile(r'sandbox.{0,20}den|rejected by user|was not approved|blocked by policy', re.I)
-RETRO_DIR = os.path.expanduser(os.environ.get('RETRO_DIR') or '~/notes/retro')
+# v7: 新增 Antigravity（agy）会话（ag: 前缀，排除 nesting_depth > 0 的子代理会话）；sessions 多一项 agy，
+#     user_turns / tool_calls 等计数含 agy，跨期比较时看 rates，或减去 agy 部分再和 v6 比
+RETRO_DIR = paths.RETRO_DIR
 
 def load_config():
-    here = os.path.dirname(os.path.realpath(__file__))
     configured = os.environ.get('RETRO_CONFIG')
-    paths = [os.path.join(RETRO_DIR, 'config.json'), os.path.join(here, '..', 'config.json')]
-    for p in [os.path.expanduser(configured)] if configured else paths:
-        if configured or os.path.exists(p):
-            with open(p, encoding='utf-8') as f:
-                return json.load(f)
-    return {}
+    path = os.path.expanduser(configured) if configured else os.path.join(paths.CONFIG_DIR, 'retro.json')
+    if not os.path.exists(path):
+        if configured: sys.exit(f'RETRO_CONFIG 指定的配置文件不存在：{path}')
+        return {}
+    try:
+        with open(path, encoding='utf-8') as f: cfg = json.load(f)
+    except (OSError, UnicodeError, ValueError) as e:
+        sys.exit(f'读取扫描配置失败：{path}：{e}')
+    if not isinstance(cfg, dict): sys.exit(f'扫描配置应为 JSON 对象：{path}')
+    return cfg
 CFG = load_config()
+AGY_EXTRA = agy.config_dirs(CFG)
+if AGY_EXTRA is None: sys.exit('扫描配置 agy_brain_dirs 无效：应为路径字符串或字符串列表')
+
+def extend(builtin, key, full=False):
+    """内置正则 + 配置里补充的说法（字符串或字符串列表，按「或」合并）。full=True 时补充项要整句匹配。"""
+    extra = CFG.get(key) or []
+    extra = [extra] if isinstance(extra, str) else extra
+    try:
+        if not isinstance(extra, list) or not all(isinstance(x, str) for x in extra): raise TypeError('应为正则字符串或字符串列表')
+        for x in extra: re.compile(x)
+    except (TypeError, re.error) as e:
+        sys.exit(f'扫描配置 {key} 无效：{e}')
+    if not extra: return re.compile(builtin)
+    tail = '|'.join(f'(?:^(?:{x})$)' if full else f'(?:{x})' for x in extra)
+    return re.compile(f'(?:{builtin})|{tail}')
+
+SELF_CORR = re.compile(r'[^。\n]*(更正|我说错|说错了|看反|是我看错|收回|我上一条|我上次说|之前说的不对|不是我之前说的|我前面说过)[^。\n]*')
+USER_CORR = extend(r'(不对|不是这样|错了|看错|搞错|说错|看反|没理解|没太理解|不要写|不用写|别再|只想看|只解决|先停|停掉|不是我要的'
+                       r'|为啥不是|为什么不是|不用找|不用管|不要用|应该是.{0,30}吧|你直接改|直接改|写死|需要你修复|不行么|只需要|按照规范|不要干预|不要限制|尽量简短|等部署好|给个结论)', 'user_corr')
+USER_OBS = extend(r'(卡在哪|为啥这么慢|为什么这么慢|怎么这么慢|现在什么情况|现在是什么情况|在跑.{0,6}么|还在跑|跑完了?么|推送了么|怎么还没'
+                      r'|进展现在是啥|是不是结束了|有啥异常么|改了么|是不是.{0,8}过期|这个是改哪个|进展怎么样|进度怎么样)', 'user_obs')
+# 空确认：agent 停下来问、用户只回一句同意，没有新信息。多了说明 agent 在不必要的地方停
+EMPTY_OK = extend(r'^(好的?|行|可以的?|嗯)?[，, ]*(那就?)?(提交|推送|推|修|改|加上|开干|开搞|继续|绑定|精简|删掉|修一下|改下|修复下|全部确认|按照你的建议来|接着干)?'
+                      r'(一下)?(吧|下吧)?[。！ ]*$', 'empty_ok', full=True)
+CL_DENY = re.compile(r'denied|auto mode classifier|not allowed|Blocked:|安全检查|safety check', re.I)
+CX_DENY = re.compile(r'sandbox.{0,20}den|rejected by user|was not approved|blocked by policy', re.I)
+AG_DENY = re.compile(r'permission check failed|denied by|Permission prompt|rejected by user|was not approved', re.I)
 # 统计 `<cli> <子命令> --help` 的 CLI 列表：填你常用、且有速查技能覆盖的那几个
 HELP_CLIS = CFG.get('help_clis') or ['gh', 'kubectl', 'docker', 'aws', 'gcloud']
 HELP = re.compile(r'((?:' + '|'.join(map(re.escape, HELP_CLIS)) + r')\s+[\w+.-]+(?:\s+[\w+.-]+)?)\s+(?:--help|-h\b)')
@@ -96,7 +124,8 @@ DOMAINS = [tuple(d) for d in CFG.get('domains', [])] or [
     (r'\bdocker\b', 'Docker', None),
     (r'\bcurl\b[^|;&\n]*(?:Authorization|Bearer)', '带鉴权调接口', None),
 ]
-FLOW_SKIP = re.compile(r'^(?:git|go|gofmt|bun|npm|pnpm|node|npx|make|ci\.sh|vitest|pytest|python3?|cargo|tsc|eslint|dispatch\.sh|ledger\.py)$')
+# 不成族的通用构建 / 测试 / 运行命令；config.json 的 flow_skip 可补充（程序名正则）
+FLOW_SKIP = extend(r'^(?:git|go|gofmt|bun|npm|pnpm|node|npx|make|ci\.sh|vitest|pytest|python3?|cargo|tsc|eslint|dispatch\.sh|ledger\.py)$', 'flow_skip', full=True)
 TRIVIAL = set('cat sed head tail grep rg ls echo jq wc find sort awk cut printf true sleep date xargs tee tr uniq diff stat realpath '
               'basename dirname test export set source cd pwd which command type mkdir cp mv rm touch chmod ln env timeout nl column '
               'readlink du ps kill sha256sum base64 for do done if then fi while else elif exit read local seq until func function'.split())
@@ -224,6 +253,15 @@ def retro_start(path):
     except OSError: pass
     return None
 
+def agy_retro_start(path):
+    """agy 版的 retro_start：用户以 /weekly-retro 开头发起，或 run_command 执行过扫描 / 回放脚本。"""
+    try:
+        for kind, x, a, b in agy.steps(path):
+            if (kind == 'user' and re.match(r'/?weekly-retro\b', a.strip())) or \
+               (kind == 'call' and RETRO_RUN.search(agy.command(a, b) or '')): return x or 0
+    except OSError: pass
+    return None
+
 def scan_claude(files, A, W0):
     for f, cut in files:
         W = (W0[0], min(W0[1], cut))
@@ -284,6 +322,33 @@ def scan_codex(files, A, W0):
                 out = json.dumps(p.get('output', ''), ensure_ascii=False)
                 if CX_DENY.search(out[:600]): A.add('denied', out.replace('\\n', ' '), src)
 
+def scan_agy(convs, A, W0):
+    """convs: (transcript 路径, conversationId, 元数据, 截止时间)。子代理会话在收集时已排除。"""
+    for f, cid, meta, cut in convs:
+        W = (W0[0], min(W0[1], cut))
+        src = 'ag:' + cid[:8]; A.F.session(src)
+        cwd = (meta.get('workspaces') or [None])[0]
+        for kind, x, a, b in agy.steps(f):
+            if x is None or not (W[0] <= x < W[1]): continue
+            if kind == 'call' and not cwd and isinstance(b.get('Cwd'), str): cwd = b['Cwd']
+            A.cover(cwd or '(agy 未知工作区)', None, src)  # 没有 db 也没有 Cwd 时仍要计入会话数
+            if kind == 'user':
+                if a and not a.startswith(SKIP_USER): A.user(x, 'agy', src, a); A.F.user(x, a)
+            elif kind == 'text':
+                for m in SELF_CORR.finditer(a): A.add('self_correction', m.group(0), src)
+            elif kind == 'call':
+                A.M['tool_calls'] += 1
+                cmd = agy.command(a, b)
+                if cmd is not None: A.helps(cmd, src); A.F.call(x, cmd)
+                m = SKILL_PATH.search(agy.file_path(b) or '')
+                if m: A.skill(m.group(1), src)
+            elif kind == 'result':
+                txt = agy.result_error(a, b)
+                if txt is None: continue
+                txt = txt.replace('\n', ' '); n = (b or {}).get('name') or a.get('type') or '?'
+                k = err_kind('Bash' if n == 'run_command' else n, txt); A.errk[k] += 1
+                A.add('denied' if (k in ('sleep_blocked', 'rm_safety') or AG_DENY.search(txt[:300])) else 'tool_error', f"[{n}] {txt}", src)
+
 def codex_cmds(p):
     # Codex 的 exec 是一段 JS，里面可能有多次 tools.exec_command({cmd: "..."})；function_call 的参数是 JSON
     raw = p.get('input') or p.get('arguments') or ''
@@ -294,7 +359,7 @@ def codex_cmds(p):
     return out
 
 def hook_hits(W):
-    path = os.path.expanduser('~/.local/state/agent-hooks/hits.jsonl'); out = collections.Counter()
+    path = os.path.join(paths.STATE_DIR, 'hooks', 'hits.jsonl'); out = collections.Counter()
     if not os.path.exists(path): return {}
     for line in open(path):
         try:
@@ -321,11 +386,15 @@ KEYS = ('self_correction', 'intervention_correction', 'intervention_observabilit
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--since', required=True); ap.add_argument('--until')
-    ap.add_argument('--out', help='报告目录，默认 $RETRO_DIR/<年>-W<周>（RETRO_DIR 默认 ~/notes/retro）')
+    ap.add_argument('--out', help='报告目录，默认 $RETRO_DIR/<年>-W<周>（RETRO_DIR 默认 $RSTACK_HOME/retro）；不能指向 rstack 仓库内')
     ap.add_argument('--include-retro', action='store_true', help='不排除复盘会话（默认丢掉发起复盘之后的记录：它们引用的例子会被重复计数）')
     a = ap.parse_args()
     since = dt.datetime.fromisoformat(a.since).timestamp()
     until = dt.datetime.fromisoformat(a.until).timestamp() if a.until else dt.datetime.now().timestamp()
+    if a.out is None:
+        year, week, _ = dt.datetime.fromtimestamp(until).isocalendar()
+        a.out = os.path.join(RETRO_DIR, f'{year}-W{week:02d}')
+    paths.refuse_repo_out(a.out)  # 扫描前就拦，别白跑一遍
     A = Acc(); W = (since, until)
     claude = os.path.expanduser(os.environ.get('CLAUDE_CONFIG_DIR') or '~/.claude')
     codex = os.path.expanduser(os.environ.get('CODEX_HOME') or '~/.codex')
@@ -340,15 +409,28 @@ def main():
                 A.excluded.append((os.path.basename(f)[:8] if k == 'claude' else os.path.basename(f)[-18:-6]) + '@' + dt.datetime.fromtimestamp(cut).strftime('%m-%d %H:%M'))
                 if cut <= since: continue
             files[k].append((f, cut if cut is not None else float('inf')))
-    scan_claude(files['claude'], A, W); scan_codex(files['codex'], A, W)
+    convs, sub = [], 0  # agy：按 brain 目录逐个会话收集，子代理会话（nesting_depth > 0）不计
+    for brain in agy.brain_dirs(AGY_EXTRA):
+        meta = agy.summaries(brain)
+        for cid, f in agy.conversations(brain):
+            if os.path.getmtime(f) < since: continue
+            m = meta.get(cid, {})
+            if m.get('depth', 0) > 0: sub += 1; continue
+            cut = None if a.include_retro else agy_retro_start(f)
+            if cut is not None:
+                A.excluded.append(cid[:8] + '@' + dt.datetime.fromtimestamp(cut).strftime('%m-%d %H:%M'))
+                if cut <= since: continue
+            convs.append((f, cid, m, cut if cut is not None else float('inf')))
+    scan_claude(files['claude'], A, W); scan_codex(files['codex'], A, W); scan_agy(convs, A, W)
     cov = {k: {'sessions': len(v['sessions']), 'branches': sorted(v['branches'])} for k, v in sorted(A.C.items(), key=lambda kv: -len(kv[1]['sessions']))}
     sess = {s for v in A.C.values() for s in v['sessions']}
     counts = {k: A.B[k]['count'] for k in KEYS}; tc = max(A.M['tool_calls'], 1); ut = max(A.M['user_turns'], 1)
     metrics = {
         'metrics_version': METRICS_VERSION, 'since': a.since,
         'until': a.until or dt.datetime.fromtimestamp(until).strftime('%Y-%m-%dT%H:%M'),
-        'sessions': {'claude': sum(s.startswith('cl:') for s in sess), 'codex': sum(s.startswith('cx:') for s in sess)},
-        'excluded_retro_sessions': sorted(A.excluded), 'user_turns': A.M['user_turns'], 'tool_calls': A.M['tool_calls'], **counts,
+        'sessions': {'claude': sum(s.startswith('cl:') for s in sess), 'codex': sum(s.startswith('cx:') for s in sess),
+                     'agy': sum(s.startswith('ag:') for s in sess)},
+        'excluded_retro_sessions': sorted(A.excluded), 'excluded_agy_subagents': sub, 'user_turns': A.M['user_turns'], 'tool_calls': A.M['tool_calls'], **counts,
         'rates': {  # 跨周比较用比率：工具类按每千次工具调用，对话类按每百条用户消息
             **{k + '_per_1k_tools': round(counts[k] * 1000 / tc, 1) for k in ('self_correction', 'help_lookup', 'denied', 'tool_error')},
             **{k + '_per_100_turns': round(counts[k] * 100 / ut, 1) for k in ('intervention_correction', 'intervention_observability', 'empty_confirm')}},
@@ -356,9 +438,6 @@ def main():
         'skill_usage': dict(A.skills.most_common()), 'error_kinds': dict(A.errk.most_common()),
         'hook_hits': hook_hits(W), 'flows': A.F.report(), 'coverage': cov,
     }
-    if a.out is None:
-        year, week, _ = dt.datetime.fromtimestamp(until).isocalendar()
-        a.out = os.path.join(RETRO_DIR, f'{year}-W{week:02d}')
     os.umask(0o077)
     os.makedirs(a.out, exist_ok=True)
     json.dump(metrics, open(os.path.join(a.out, 'metrics.json'), 'w'), ensure_ascii=False, indent=2)

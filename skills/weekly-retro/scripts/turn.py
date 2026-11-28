@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""查看一次用户介入前的回合，支持 Claude Code 和 Codex。
+"""查看一次用户介入前的回合，支持 Claude Code、Codex 和 Antigravity（agy）。
 
 用法: python3 -I turn.py '<会话标识>|<月-日 时:分>|<关键词>' ...
 例: python3 -I turn.py 'cl:1234abcd|01-10 11:34|应该是这个文档'
+会话标识前缀：cl:（Claude Code）、cx:（Codex）、ag:（agy，brain 目录的找法和 scan.py 相同）。
 标识和时间取自 turns.tsv。也接受旧格式的 Claude 会话前缀和「日 时:分」。
 输出可能含原始用户消息、模型回复和命令。TAIL / TW / AFTER 可调整截取长度。
 """
 import datetime as dt
+import importlib.util
 import json
 import os
 import re
@@ -18,6 +20,59 @@ CODEX = Path(os.environ.get('CODEX_HOME') or '~/.codex').expanduser()
 TW = int(os.environ.get('TW', '110'))
 TAIL = int(os.environ.get('TAIL', '900'))
 AFTER = int(os.environ.get('AFTER', '0'))
+
+
+def _load(name):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(os.path.dirname(os.path.realpath(__file__)), name + '.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def agy_brains():
+    """和 scan.py 一样读私有配置里的 agy_brain_dirs；配置读不了就只用默认目录和 AGY_BRAIN_DIRS。"""
+    agy, paths = _load('agy_log'), _load('rstack_paths')
+    cfg_path = os.path.expanduser(os.environ.get('RETRO_CONFIG') or os.path.join(paths.CONFIG_DIR, 'retro.json'))
+    try:
+        with open(cfg_path, encoding='utf-8') as f:
+            cfg = json.load(f)
+    except (OSError, UnicodeError, ValueError):
+        cfg = {}
+    extra = agy.config_dirs(cfg if isinstance(cfg, dict) else {}) or []
+    return agy, agy.brain_dirs(extra)
+
+
+def load_agy(key):
+    agy, brains = agy_brains()
+    found = {}
+    for brain in brains:
+        for cid, path in agy.conversations(brain):
+            if cid.startswith(key):
+                found.setdefault(os.path.realpath(path), path)
+    if len(found) != 1:
+        raise ValueError(f'找不到唯一会话：ag:{key}（匹配 {len(found)} 个）')
+    events, calls = [], {}  # calls：tool_call 参数对象 → 事件下标，用来把报错接到配对的调用上
+    for kind, x, a, b in agy.steps(next(iter(found.values()))):
+        if x is None:
+            continue
+        if kind == 'call':
+            calls[id(b)] = len(events)
+        when = dt.datetime.fromtimestamp(x).astimezone()
+        if kind == 'user' and a:
+            events.append((when, 'user', 'text', a))
+        elif kind == 'text':
+            events.append((when, 'assistant', 'text', a))
+        elif kind == 'call':
+            detail = agy.command(a, b) or agy.file_path(b) or b.get('query') or b.get('ToolName') or b
+            events.append((when, 'assistant', 'tool', f'{a} {str(detail)[:TW]}'))
+        elif kind == 'result' and (err := agy.result_error(a, b)) is not None:
+            # 报错接在配对的那次调用后面，不另算一次工具
+            j = calls.get(id((b or {}).get('args')))
+            if j is None:
+                events.append((when, 'assistant', 'tool', f"{a.get('type')} ✗ {err[:TW]}"))
+            else:
+                events[j] = (*events[j][:3], f'{events[j][3]} ✗ {err[:TW]}')
+    return events
 
 
 def text_of(content):
@@ -34,6 +89,8 @@ def load(sid):
         source, key = 'cl', source
     if not re.fullmatch(r'[a-zA-Z0-9_-]+', key):
         raise ValueError(f'无效会话标识：{sid}')
+    if source == 'ag':
+        return load_agy(key)
     if source == 'cl':
         paths = sorted((CLAUDE / 'projects').glob(f'*/{key}*.jsonl'))
     elif source == 'cx':

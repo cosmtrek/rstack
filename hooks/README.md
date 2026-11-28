@@ -3,10 +3,17 @@
 - `pretool_guard.py`：PreToolUse(Bash) 守卫，命中已知的高代价误操作时拦下或要求确认，并带上修复提示。
 - `posttool_delegate_nudge.py`：PostToolUse 委派提醒，只注入提示、不拦截。
 - `install_hooks.py`：幂等地把两者合并进 `~/.claude/settings.json`，不动已有的其他 hook，改之前自动备份。
+- `guard_rules.example.json`：守卫规则格式示例。
+
+目录约定：`$RSTACK_HOME` 默认 `~/.rstack`。规则、日志都在这里，不进仓库。
 
 只有 Claude Code 执行 hook；Codex 等其他 agent 靠全局约定和前置检查脚本。能做成脚本的优先做脚本。
 
 ## 守卫规则怎么写
+
+- **规则放私有文件**：`$RSTACK_RULES` 指定的 JSON，否则 `$RSTACK_HOME/config/guard_rules.json`（复制 `guard_rules.example.json` 再改）；
+  都没有或读不了时用 `pretool_guard.py` 里的内置示例。有私有文件就只用私有规则，示例不叠加；正则写坏的单条规则会被跳过。
+  从复盘里长出来的规则都和环境有关，只写进私有文件；仓库里只改匹配机制本身。
 
 - **默认 ask，确定会失败才 deny。** deny 的提示里写清怎么做才对（修复提示），并说明豁免方式。
 - **豁免**：命令末尾加 `# confirmed-by-user` 视为用户已确认，直接放行并记日志。agent 只能在用户明确同意后加。
@@ -14,11 +21,12 @@
 - **出错放行**：脚本任何异常都 exit 0；settings 里 timeout 5 秒。
 - **上线前回放**：新增或修改规则后，拿最近一周 transcript 里的全部 Bash 命令回放一遍，确认只命中该拦的。
 - **只放用户级**：不改仓库或插件的 hook；个人 hook 不抢别人的拒绝权。
-- **记日志**：每次命中写 `~/.local/state/agent-hooks/hits.jsonl`（rule / decision / session / selftest，不保存命令原文和工作目录）。weekly-retro 统计命中次数、
+- **记日志**：每次命中写 `$RSTACK_HOME/state/hooks/hits.jsonl`（rule / decision / session / selftest，不保存命令原文和工作目录）。weekly-retro 统计命中次数、
   豁免比例（≈误拦率）、连续零命中；误拦高就改，长期零命中就删。
-- **自测**：每条规则带一个 `selftest` 命令（用 `false &&` 短路、带 `# retro-selftest` 标记），weekly-retro 每期用 Bash 工具跑一次，
-  期望被拦并写日志；扫描时记为 `<rule>:selftest`，不算真实命中。
-- **来源**：每条规则在下表记一行来源（哪一期复盘、什么问题），方便以后判断还要不要留。
+- **自测**：每条规则带一个 `selftest` 命令（用 `false &&` 短路、带 `# retro-selftest` 标记），`python3 -I pretool_guard.py --selftests`
+  列出当前生效规则的自测命令；weekly-retro 每期用 Bash 工具逐条跑一次，期望被拦并写日志；扫描时记为 `<rule>:selftest`，不算真实命中。
+- **来源**：每条规则记一行来源（哪一期复盘、什么问题），方便以后判断还要不要留。私有规则的来源记在私有台账（`$RSTACK_HOME/retro/ledger/changes.md`），
+  下表只列内置示例。
 
 | id | 决策 | 拦什么 | 来源 |
 |---|---|---|---|
@@ -27,11 +35,11 @@
 
 ## 委派提醒（delegate-nudge）
 
-主会话从上次派发或写操作（改文件、git commit/push）起连续 N 次只读调用（默认 25，`NUDGE_THRESHOLD` 可调），注入一次「委派提醒」，
+主会话从上次派发（Bash 里真正执行 `dispatch.sh`；`cat`、`sed`、`grep` 它不算）或写操作（改文件、git commit/push）起连续 N 次只读调用（默认 25，`NUDGE_THRESHOLD` 可调），注入一次「委派提醒」，
 之后每满 N 次再提醒；提醒只指向全局委派约定，不点名执行方；子代理不提醒。
 
 - 为什么需要它：委派判断写在技能里，但模型经常只加载了某个专项技能（比如排查类），委派判断根本没被读到；用 hook 在「已经读了很多」
   的那一刻兜底。
 - 阈值怎么调：`skills/claude-lead/scripts/timing.py` 用历史会话复算提醒点，看不同阈值能覆盖多少「读了很多却没派」的会话、
   提醒后有没有派、派出去的结果如何。
-- 计数存 `~/.local/state/agent-hooks/nudge/<session>`。自测：`--selftest` 加 `NUDGE_STATE=<临时目录>`，喂 N 次 Read 期望第 N 次输出提醒。
+- 计数存 `$RSTACK_HOME/state/hooks/nudge/<session>`（`NUDGE_STATE` 可改）。自测：`--selftest` 加 `NUDGE_STATE=<临时目录>`，喂 N 次 Read 期望第 N 次输出提醒。

@@ -11,7 +11,9 @@
 """
 import argparse, collections, datetime as dt, glob, importlib.util, json, os, re
 
-REC = os.path.expanduser("~/.local/state/agent-delegate/records.jsonl")
+RSTACK_HOME = os.path.expanduser(os.environ.get("RSTACK_HOME") or "~/.rstack")
+REC = os.path.join(RSTACK_HOME, "state", "delegate", "records.jsonl")
+CLAUDE = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude")
 # 本脚本在 <repo>/skills/claude-lead/scripts/，hook 在 <repo>/hooks/；软链安装时按真实路径找，也可用 NUDGE_HOOK 指定
 HOOK = os.environ.get("NUDGE_HOOK") or os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "..", "hooks", "posttool_delegate_nudge.py")
 spec = importlib.util.spec_from_file_location("nudge", HOOK); nudge = importlib.util.module_from_spec(spec); spec.loader.exec_module(nudge)
@@ -58,13 +60,13 @@ def main():
     since = dt.datetime.fromisoformat(a.since).timestamp()
     idx, bytask = load_records()
     dispatches, nudges, seen = [], [], set()
-    for f in glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl")):
+    for f in glob.glob(glob.escape(CLAUDE) + "/projects/*/*.jsonl"):
         if os.path.getmtime(f) < since: continue
         ev = [e for e in session_events(f) if e[0] and dt.datetime.fromisoformat(e[0].replace("Z", "+00:00")).timestamp() >= since]
         n = sess = 0; pend = []
         for i, (ts, name, inp) in enumerate(ev):
             k = nudge.kind(name, inp); cmd = inp.get("command", "") if isinstance(inp.get("command"), str) else ""
-            if k == "reset" and "dispatch.sh" in cmd:
+            if k == "reset" and nudge.is_dispatch(cmd):
                 m = re.search(r"dispatch\.sh\s+\S+\s+\S+\s+(\S+)\s+(\S+)", cmd)
                 o = None
                 if m and "RESUME=" not in cmd and "TASK=" not in cmd and ts:

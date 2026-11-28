@@ -4,10 +4,12 @@
 「优化下复盘技能」时不管到没到期都做。第 3 节的改动一律等用户确认。
 
 输入：`$RETRO_DIR` 下各期的 `retro.md`、`replays/summary.json` 和 `metrics.jsonl`；`$RETRO_DIR/ledger/` 下的 `changes.md`、`tune-log.md`；
-还有 hook 命中日志 `~/.local/state/agent-hooks/hits.jsonl`。
+还有 hook 命中日志 `$RSTACK_HOME/state/hooks/hits.jsonl`（`RSTACK_HOME` 默认 `~/.rstack`）。
 
-改的对象：本技能的 `SKILL.md`、本文件、`scripts/scan.py`、`scripts/replay.py`、`config.json`，个人回放集和台账（`$RETRO_DIR/replays/`、`$RETRO_DIR/ledger/`），
-以及仓库 `hooks/` 里的规则。
+改的对象分两边：
+- **私有**（`$RSTACK_HOME`，不进仓库）：扫描配置 `config/retro.json`（含补充的介入正则 `user_corr` / `user_obs` / `empty_ok`、`flow_skip`）、
+  守卫规则 `config/guard_rules.json`、个人回放集和台账（`$RETRO_DIR/replays/`、`$RETRO_DIR/ledger/`）。环境相关的规则、正则、事例只改这里。
+- **公开**（rstack 仓库）：本技能的 `SKILL.md`、本文件、`scripts/` 下的脚本、`hooks/` 的匹配机制。只放通用机制和修复，不带具体事例。
 
 ## 1. 评估复盘效果（只读，到期自动做）
 
@@ -34,6 +36,7 @@
 每个调整对应评估里的一个具体问题，不为假设的需要加东西。能删就删：长期为 0 的指标、没人看的步骤、零命中的 hook、没有区分度的回放题。
 
 - 改了指标口径，就把 `METRICS_VERSION` 加 1，在 `$RETRO_DIR/ledger/tune-log.md` 写明前后不能直接比较，必要时重跑基线。
+  只改 `retro.json` 的补充正则不动版本号，但同样在 `tune-log.md` 记一笔，跨期对比时知道口径变过。
 - 技能保持简短，只写判断依据和边界。
 
 评估结论和调整方案并进 weekly-retro 第 6 步的确认表（单列一组「复盘本身」），和本期发现一起给用户逐条确认。没有要调整的也写一行结论。
@@ -44,5 +47,5 @@
 ## 3. 落地（用户确认后）
 
 - 改完后自测：`scan.py` 跑最近一周，`replay.py` 跑一两道题，hook 规则用最近一周的 Bash 命令回放。确认都能跑通、结果合理。
-- 提交到你的技能仓库。
+- 私有改动直接落在 `$RSTACK_HOME`；公开改动提交前跑 `bash scripts/check_public.sh`，通过了再提交到 rstack 仓库。
 - 在这次评估的 `tune-log.md` 条目里补上：依据（哪几期、哪些证据）、改了什么、下次怎么判断这次调整有没有用。

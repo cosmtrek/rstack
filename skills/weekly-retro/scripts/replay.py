@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""用全新的只读 Codex 会话运行 $RETRO_DIR/replays/*.json，并按预期结论判分。"""
+"""用全新的只读 Codex 会话运行 $RETRO_DIR/replays/*.json，并按预期结论判分。
+
+RETRO_DIR 默认 $RSTACK_HOME/retro（RSTACK_HOME 默认 ~/.rstack）。--out 不能指向 rstack 仓库内。
+"""
 import argparse
 import concurrent.futures
+import importlib.util
 import json
 import os
 import re
@@ -10,7 +14,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-RETRO_DIR = Path(os.environ.get('RETRO_DIR') or '~/notes/retro').expanduser()
+_spec = importlib.util.spec_from_file_location('rstack_paths', Path(__file__).resolve().parent / 'rstack_paths.py')
+paths = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(paths)
+RETRO_DIR = Path(paths.RETRO_DIR)
 PREFIX = ('这是一道只读回放题。只读取作答所需的材料，禁止修改文件、提交推送、调用写接口或发消息。'
           '可以按全局约定使用已安装的技能。用一段话给出结论和依据。\n\n')
 
@@ -102,13 +109,14 @@ def load_questions(parser):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--out', type=Path, required=True, help='本期目录，回答写到 <out>/replays/；不能在 rstack 仓库内')
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument('--only', help='用逗号分隔的题号')
     selection.add_argument('--example', action='store_true', help='用合成文件冒烟，无需自行建题')
     parser.add_argument('--model', default=os.environ.get('REPLAY_MODEL'))
     parser.add_argument('--effort', default='medium')
     args = parser.parse_args()
+    paths.refuse_repo_out(str(args.out.expanduser()))
     os.umask(0o077)
     out = args.out.expanduser().resolve() / 'replays'
     questions = [] if args.example else load_questions(parser)

@@ -1,15 +1,16 @@
 ---
 name: weekly-retro
-description: 每周复盘会话历史，把经验沉淀成环境资产（hook、前置检查脚本、工具、技能、记忆、全局约定），纠正 agent 反复犯的错，补上缺的上下文，目标是让之后的任务不靠人提醒就能做对。范围是本机所有项目（含各分支和 worktree），读 Claude Code / Codex 会话记录，跑固定指标，在失败拐点看完整轨迹做归因，优先产出动态补丁，用回放集验证，经用户确认后落地并记账；每两期顺带评估一次复盘本身。用户说 /weekly-retro、「每周复盘」「复盘下本周会话」「看看本周有哪些可以沉淀的」，或「看看复盘效果怎么样」「优化下复盘技能」时使用。
+description: 每周复盘会话历史，把经验沉淀成环境资产（hook、前置检查脚本、工具、技能、记忆、全局约定），纠正 agent 反复犯的错，补上缺的上下文，目标是让之后的任务不靠人提醒就能做对。范围是本机所有项目（含各分支和 worktree），读 Claude Code / Codex / Antigravity（agy）会话记录，跑固定指标，在失败拐点看完整轨迹做归因，优先产出动态补丁，用回放集验证，经用户确认后落地并记账；每两期顺带评估一次复盘本身。用户说 /weekly-retro、「每周复盘」「复盘下本周会话」「看看本周有哪些可以沉淀的」，或「看看复盘效果怎么样」「优化下复盘技能」时使用。
 argument-hint: "[起始时间，默认接上期的 until]"
 ---
 
 # weekly-retro：每周复盘
 
-\`$WR\` = 本技能目录（一般是 \`~/.claude/skills/weekly-retro/\` 或 \`~/.codex/skills/weekly-retro/\`，按实际安装目录取值）。
-\`$RETRO_DIR\` = 个人复盘目录（默认 \`~/notes/retro\`，运行脚本时沿用同一个目录）。每期一个 \`<年>-W<周>/\` 子目录，跨期的 \`metrics.jsonl\`
-放在 \`$RETRO_DIR\`。个人回放和台账放在 \`$RETRO_DIR/replays/\` 和 \`$RETRO_DIR/ledger/\`。仓库提供格式示例，按需复制模板到个人目录。
-扫描配置可放在 \`$RETRO_DIR/config.json\`，也可通过 \`RETRO_CONFIG\` 指定文件。
+\`$WR\` = 本技能目录（一般是 \`~/.claude/skills/weekly-retro/\` 、\`~/.codex/skills/weekly-retro/\` 或 agy 的 \`~/.gemini/config/skills/weekly-retro/\`，按实际安装目录取值）。
+\`$RSTACK_HOME\` = 私有根目录（默认 \`~/.rstack\`）。\`$RETRO_DIR\` = 个人复盘目录（默认 \`$RSTACK_HOME/retro\`，运行脚本时沿用同一个目录）。
+每期一个 \`<年>-W<周>/\` 子目录，跨期的 \`metrics.jsonl\` 放在 \`$RETRO_DIR\`。个人回放和台账放在 \`$RETRO_DIR/replays/\` 和 \`$RETRO_DIR/ledger/\`。
+仓库提供格式示例，按需复制模板到个人目录。扫描配置在 \`$RSTACK_HOME/config/retro.json\`（\`RETRO_CONFIG\` 可指定别的文件），
+守卫规则在 \`$RSTACK_HOME/config/guard_rules.json\`，hook 日志在 \`$RSTACK_HOME/state/hooks/\`。
 方法论的来由见 `DESIGN.md`。
 
 ## 原则
@@ -36,7 +37,7 @@ argument-hint: "[起始时间，默认接上期的 until]"
 - **范围是本机所有项目**，包括各仓库的分支、worktree 和临时目录里的会话。开始前告知用户扫描范围。报告可能包含消息原文、命令、路径和资源标识。只把归因所需的片段带入模型上下文，先遮掉凭证和与任务无关的身份信息。复盘产物留在个人目录。
 - **指标**：`python3 -I "$WR/scripts/scan.py" --since <起点> --until <终点>`。窗口从上期的 `until`
   接着算（见 `metrics.jsonl` 最后一行），不要固定从周一起，否则两期之间的会话没人看；`--until` 写明，重跑才得到同样的数。
-  默认按终点所在的 ISO 周在 `$RETRO_DIR` 下写报告，可用 `--out` 指定仓库外的目录。先看 `metrics.json` 的 `coverage`，确认本周用过的仓库和 worktree 都在里面。关注这几项：
+  默认按终点所在的 ISO 周在 `$RETRO_DIR` 下写报告，可用 `--out` 指定仓库外的目录（指向 rstack 仓库内会直接报错）。先看 `metrics.json` 的 `coverage`，确认本周用过的仓库和 worktree 都在里面。关注这几项：
   - `intervention_correction`、`intervention_observability`：用户纠正、追问进度或卡顿；
   - `empty_confirm`：agent 停下来问、用户只回一句「提交吧」「好的」。多了说明它在不该停的地方停；
   - `self_correction`；
@@ -44,13 +45,17 @@ argument-hint: "[起始时间，默认接上期的 until]"
   - `flows`：高频高成本流程，不看成败。`top` 按领域给出流程实例数、会话数、平均 / 最大步数、耗时、`--help` 次数和专用工具采用率
     `tool_share`；`repeated_entities` 是跨 3 个以上会话反复手写的 ID / 坐标；`adhoc_wrappers` 是临时手写的接口包装脚本。
     领域表在 `config.json` 的 `domains`，表外的命令按「程序 子命令」自动成族；表外的族连续两期排进前列，就补进 `domains`（有专用工具的写上工具正则）；
-  - `hook_hits`：各规则的命中次数和豁免次数。已安装 Hook 时，扫描前先用 Bash 工具逐条跑守卫（仓库 `hooks/pretool_guard.py`）里每条规则的
-    `selftest` 命令，应当被拦，扫描里出现 `<rule>:selftest`；没被拦或没记上，先修 hook 再看命中数。自测正常、连续 3 期零真实命中的规则，提议删除。
+  - `hook_hits`：各规则的命中次数和豁免次数。已安装 Hook 时，扫描前先用 `python3 -I <仓库>/hooks/pretool_guard.py --selftests`
+    列出当前生效规则的 `selftest` 命令，再用 Bash 工具逐条跑，应当被拦，扫描里出现 `<rule>:selftest`；没被拦或没记上，先修 hook 再看命中数。自测正常、连续 3 期零真实命中的规则，提议删除。
 
   复盘会话（用 `/weekly-retro` 发起，或执行过扫描、回放脚本的）从发起那一刻起不计入，之前的正常开发照常统计，
   列在 `excluded_retro_sessions`（`会话@截止时间`）。
+  agy 会话以 `ag:` 标识，子代理会话（`nesting_depth > 0`，是主会话派出去的）不计，个数在 `excluded_agy_subagents`；
+  `sessions.agy` 为 0 而本期用过 agy 时，检查 brain 目录是否在默认的 `${GEMINI_HOME:-~/.gemini}/*/brain` 之外，
+  在 `retro.json` 的 `agy_brain_dirs` 或 `AGY_BRAIN_DIRS` 里补上。
 - **介入以人工判读为准**：正则只是预标注，漏得多。通读 `turns.tsv`（窗口内所有短的用户消息），把纠正、追问、空确认挑出来，
-  没标签的也要看；`retro.md` 里记判读后的数。预标注漏掉的说法补进 `scan.py` 的正则。
+  没标签的也要看；`retro.md` 里记判读后的数。预标注漏掉的说法补进 `retro.json` 的 `user_corr` / `user_obs` / `empty_ok`
+  （和内置正则按「或」合并）；只有换个环境也成立的通用说法才改 `scan.py` 的内置正则。
 - **其他数据源**：用了扫描脚本没覆盖的 agent（没有本地会话记录的），本期用它做过开发时才去它的界面或 API 补介入。
 - **记忆体检**：检查所有记忆目录（软链的只算一次）：超长的索引行和文件、需求已收尾却还在索引里的条目、引用已失效的东西、互相矛盾或重复的条目。
 
@@ -114,8 +119,12 @@ agent 最后一段话。一次可以传多个，输出是截短的，多数失�
 ## 7. 落地、写回放题、验证
 
 - 只改个人环境：hook、脚本、技能、全局约定、记忆、复盘记录。业务代码，以及团队仓库里的 `AGENTS.md` 和 `.agents/`，只在报告里提建议。
-- 落地位置：技能和 hook 放在你的技能仓库里，改完提交；全局约定改那份被链接到各 agent 的源文件；记忆删除某条之前，
-  先确认没有别的记忆用 `[[...]]` 链接它。
+- 落地位置先分公开和私有：
+  - **私有**（`$RSTACK_HOME`，不进仓库）：只对你的环境成立的东西——守卫规则（`config/guard_rules.json`）、扫描配置和补充正则（`config/retro.json`）、
+    派发信封的本机红线（`config/envelope.local.md`）、具体事例、内部 ID、路径。
+  - **公开**（rstack 仓库）：换个环境也成立的通用机制和 bug 修复，写法里不带具体事例。提交前必须跑 `bash scripts/check_public.sh`
+    （pre-commit hook 也会跑），不通过就把内容挪进 `$RSTACK_HOME` 或改写成通用说法。
+  - 全局约定改那份被链接到各 agent 的源文件；记忆删除某条之前，先确认没有别的记忆用 `[[...]]` 链接它。
 - 每条采纳的发现，至少写一道**只读**回放题，放进 `$RETRO_DIR/replays/`（格式见本技能的 `replays/examples/`）。题面和标准结论会发送给模型，先移除凭证和无关隐私。题目要求：
   - 写清 `prompt`、一句标准结论 `expected` 和来源；
   - 钉住固定的提交或快照，不依赖会变化的实时状态；

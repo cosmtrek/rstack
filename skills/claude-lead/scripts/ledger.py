@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""委托台账（运行状态，不进仓库）：~/.local/state/agent-delegate/records.jsonl
+"""委托台账（运行状态，不进仓库）：$RSTACK_HOME/state/delegate/records.jsonl（RSTACK_HOME 默认 ~/.rstack）
 
   ledger.py auto <run目录>      # dispatch.sh 结束时自动调用：按 meta 追加一行客观字段
   ledger.py note <run目录> --verdict pass|partial|fail|stop [--cause brief|env|capability|right_stop]
@@ -24,7 +24,7 @@ import subprocess
 
 DEFAULT_SINCE = (datetime.date.today() - datetime.timedelta(days=30)).isoformat()
 
-STATE = os.path.expanduser("~/.local/state/agent-delegate")
+STATE = os.path.join(os.path.expanduser(os.environ.get("RSTACK_HOME") or "~/.rstack"), "state", "delegate")
 LEDGER = os.path.join(STATE, "records.jsonl")
 
 
@@ -146,8 +146,8 @@ def cmd_stats(a):
         print(f"- 未复核记账：{', '.join(unscored)}")
 
 
-RUNS = os.path.expanduser("~/.local/share/agent-delegate/runs")
-CLAUDE_PROJECTS = os.path.expanduser("~/.claude/projects")
+RUNS = os.path.join(STATE, "runs")
+CLAUDE_PROJECTS = os.path.join(os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude"), "projects")
 # 环境 / 权限类摩擦：沙箱、凭证、网络。命中说明慢在脚本或权限，不在契约。
 ENV_PAT = re.compile(r"read-only file system|Operation not permitted|Permission denied|AUTH_REQUIRED|"
                      r"no local token|not writable|sandbox (denied|blocked)|EACCES|connection refused|timed out|401 Unauthorized", re.I)

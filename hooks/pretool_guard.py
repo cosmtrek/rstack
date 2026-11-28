@@ -5,12 +5,18 @@
 - 默认 decision=ask；只有「一定会失败」的操作才 deny。
 - 匹配写窄；命令里带 `# confirmed-by-user` 视为用户已确认，直接放行（仍记日志）。
 - 出错就放行：任何异常都 exit 0，不影响正常命令。
-- 每次命中写一行到 ~/.local/state/agent-hooks/hits.jsonl，供 weekly-retro 统计命中率和误拦率。
+- 每次命中写一行到 $RSTACK_HOME/state/hooks/hits.jsonl（RSTACK_HOME 默认 ~/.rstack），供 weekly-retro 统计命中率和误拦率。
+- 规则来源：$RSTACK_RULES 指定的 JSON 文件，否则 $RSTACK_HOME/config/guard_rules.json；都没有（或读不了）就用下面的内置示例。
+  环境相关的规则只写进私有文件，不进公开仓库。格式见 guard_rules.example.json。
+- `--selftests`：逐行打印当前生效规则的 selftest 命令，供 weekly-retro 每期自测。
 """
 import json, os, re, sys, time
 
-# 每条规则来自一次复盘：某个命令「一定会失败」或「代价高到必须先问」。下面两条是示例，换成你自己复盘出来的。
-RULES = [
+RSTACK_HOME = os.path.expanduser(os.environ.get("RSTACK_HOME") or "~/.rstack")
+
+# 每条规则来自一次复盘：某个命令「一定会失败」或「代价高到必须先问」。下面两条是内置示例；
+# 你自己复盘出来的规则写进 $RSTACK_HOME/config/guard_rules.json（私有，不进仓库），有它就不用这里的示例。
+EXAMPLE_RULES = [
     {
         "id": "force-push-main",
         # 强推主干：一定是高代价操作，但偶尔确实要做，所以 ask 而不是 deny
@@ -39,7 +45,29 @@ HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1.*?\n.*?^\s*\2\s*$", re.S | re.M)
 def executable_text(cmd):
     # 去掉 heredoc 正文，避免「写文件的内容里出现命令文本」被误拦
     return HEREDOC.sub("<<HEREDOC", cmd)
-LOG = os.path.expanduser("~/.local/state/agent-hooks/hits.jsonl")
+LOG = os.path.join(RSTACK_HOME, "state", "hooks", "hits.jsonl")
+
+
+def load_rules():
+    """私有规则文件优先：顶层是规则列表，或 {"rules": [...]}。读不了、格式不对就回退内置示例；单条规则坏了只跳过那一条。"""
+    path = os.environ.get("RSTACK_RULES") or os.path.join(RSTACK_HOME, "config", "guard_rules.json")
+    try:
+        with open(os.path.expanduser(path), encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return EXAMPLE_RULES
+    rules = data.get("rules") if isinstance(data, dict) else data
+    if not isinstance(rules, list):
+        return EXAMPLE_RULES
+    ok = []
+    for r in rules:
+        try:
+            re.compile(r["pattern"])
+            if r["decision"] in ("ask", "deny") and r["id"] and r["reason"]:
+                ok.append(r)
+        except Exception:
+            continue
+    return ok
 
 def log(entry):
     try:
@@ -51,12 +79,17 @@ def log(entry):
         pass
 
 def main():
+    if "--selftests" in sys.argv[1:]:
+        for r in load_rules():
+            if r.get("selftest"):
+                print(r["selftest"])
+        return
     data = json.load(sys.stdin)
     if data.get("tool_name") != "Bash":
         return
     cmd = (data.get("tool_input") or {}).get("command", "")
     text = executable_text(cmd)
-    for r in RULES:
+    for r in load_rules():
         if not re.search(CMD_POS + r["pattern"], text, re.M):
             continue
         overridden = OVERRIDE in cmd
