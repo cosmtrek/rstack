@@ -2,7 +2,8 @@
 
 - `pretool_guard.py`：PreToolUse(Bash) 守卫，命中已知的高代价误操作时拦下或要求确认，并带上修复提示。
 - `posttool_delegate_nudge.py`：PostToolUse 委派提醒，只注入提示、不拦截。
-- `install_hooks.py`：幂等地把两者合并进 `~/.claude/settings.json`，不动已有的其他 hook，改之前自动备份。
+- `stop_ui_evidence.py`：Stop 收尾检查。本回合改了界面文件，却没把结果给用户看过（回复里没嵌图），就拦一次，提醒截图并对照现有界面自检。
+- `install_hooks.py`：幂等地把三者合并进 `~/.claude/settings.json`，不动已有的其他 hook，改之前自动备份。
 - `guard_rules.example.json`：守卫规则格式示例。
 
 目录约定：`$RSTACK_HOME` 默认 `~/.rstack`。规则、日志都在这里，不进仓库。
@@ -43,3 +44,11 @@
 - 阈值怎么调：`skills/claude-lead/scripts/timing.py` 用历史会话复算提醒点，看不同阈值能覆盖多少「读了很多却没派」的会话、
   提醒后有没有派、派出去的结果如何。
 - 计数存 `$RSTACK_HOME/state/hooks/nudge/<session>`（`NUDGE_STATE` 可改）。自测：`--selftest` 加 `NUDGE_STATE=<临时目录>`，喂 N 次 Read 期望第 N 次输出提醒。
+
+## 界面交付检查（ui-evidence）
+
+- 为什么需要它：「做完 UI 截图给用户看」写成记忆后仍反复被追问；agent 跑完类型检查就汇报，交付那一刻没有检查点。
+- 「改了界面」看本回合的 Edit/Write、Bash 写入，以及 cwd 仓库里修改时间晚于回合开始的未提交文件（覆盖派给别的 agent 改的情况）；
+  「给看过」只认回复里嵌图或调用了会展示给用户的工具（`evidence_tools`，默认 `html_render`），agent 自己的预览快照不算。
+- 只拦一次（`stop_hook_active` 放行）；回复里写 `[no-screenshot: 原因]` 豁免并记日志。路径、工具和提示语放 `$RSTACK_HOME/config/ui_check.json`。
+- 自测：`python3 -I stop_ui_evidence.py --selftest`，期望输出 ok 并记为 `ui-evidence:selftest`。

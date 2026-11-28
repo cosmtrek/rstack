@@ -20,7 +20,7 @@ EXAMPLE_RULES = [
     {
         "id": "force-push-main",
         # 强推主干：一定是高代价操作，但偶尔确实要做，所以 ask 而不是 deny
-        "pattern": r"git\s+push\b(?=[^\n;&|]*(?:--force\b|--force-with-lease\b|\s-f\b))(?=[^\n;&|]*\b(?:main|master)\b)",
+        "pattern": r"git\s+push\b(?=[^\n;&|]*(?:--force\b|--force-with-lease\b|\s-f\b))(?=[^\n;&|]*(?<![\w./-])(?:main|master)(?![\w./-]))",
         "decision": "ask",
         "reason": "要强推 main / master，会覆盖远端别人的提交。先 git fetch 看远端比本地多了哪些提交；"
                   "确认要覆盖，在命令末尾加 `# confirmed-by-user` 重跑。",

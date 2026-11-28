@@ -47,6 +47,7 @@ def main():
     directory = Path(__file__).resolve().parent
     hooks["PreToolUse"] = install(hooks.get("PreToolUse", []), directory / "pretool_guard.py", matcher="Bash")
     hooks["PostToolUse"] = install(hooks.get("PostToolUse", []), directory / "posttool_delegate_nudge.py")
+    hooks["Stop"] = install(hooks.get("Stop", []), directory / "stop_ui_evidence.py")
     if json.dumps(settings) == before:
         print("Hook 已安装。")
         return
